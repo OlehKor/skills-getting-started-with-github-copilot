@@ -7,8 +7,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
-      const response = await fetch("/activities");
+      // fetch fresh data each time to avoid browser caching stale results
+      const response = await fetch("/activities", { cache: "no-store" });
       const activities = await response.json();
+
+      // clear dropdown options (keep first placeholder)
+      while (activitySelect.options.length > 1) {
+        activitySelect.remove(1);
+      }
 
       // Clear loading message
       activitiesList.innerHTML = "";
@@ -17,14 +23,33 @@ document.addEventListener("DOMContentLoaded", () => {
       Object.entries(activities).forEach(([name, details]) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
+        activityCard.dataset.activity = name;
 
         const spotsLeft = details.max_participants - details.participants.length;
+
+        // build participant list HTML with remove buttons
+        let participantsHtml = "";
+        if (details.participants && details.participants.length) {
+          participantsHtml = `<div class="participants">
+              <strong>Participants:</strong>
+              <ul>
+                ${details.participants
+                  .map((p) => `
+                    <li>
+                      <span class="participant-email">${p}</span>
+                      <button class="remove-participant" data-email="${p}" title="Remove">&times;</button>
+                    </li>`)
+                  .join("")}
+              </ul>
+            </div>`;
+        }
 
         activityCard.innerHTML = `
           <h4>${name}</h4>
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          ${participantsHtml}
         `;
 
         activitiesList.appendChild(activityCard);
@@ -40,6 +65,40 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error fetching activities:", error);
     }
   }
+
+  // Delegate removal clicks on participants
+  activitiesList.addEventListener("click", async (event) => {
+    if (event.target.classList.contains("remove-participant")) {
+      const email = event.target.dataset.email;
+      const card = event.target.closest(".activity-card");
+      const activity = card && card.dataset.activity;
+      if (!activity || !email) return;
+
+      try {
+        const response = await fetch(
+          `/activities/${encodeURIComponent(activity)}/participants?email=${encodeURIComponent(email)}`,
+          { method: "DELETE" }
+        );
+        const result = await response.json();
+        if (response.ok) {
+          messageDiv.textContent = result.message;
+          messageDiv.className = "success";
+          fetchActivities();
+        } else {
+          messageDiv.textContent = result.detail || "An error occurred";
+          messageDiv.className = "error";
+        }
+      } catch (error) {
+        console.error("Error removing participant:", error);
+        messageDiv.textContent = "Failed to remove participant. Please try again.";
+        messageDiv.className = "error";
+      }
+      messageDiv.classList.remove("hidden");
+      setTimeout(() => {
+        messageDiv.classList.add("hidden");
+      }, 5000);
+    }
+  });
 
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
@@ -62,6 +121,8 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        // update the list so participants and availability refresh
+        fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
